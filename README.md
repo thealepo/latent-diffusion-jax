@@ -1,1 +1,1 @@
-# **GPT-2 in JAX**
+# **Mini Image Generator**
