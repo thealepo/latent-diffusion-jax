@@ -1,0 +1,9 @@
+jax
+jaxlib
+flax
+numpy
+einops
+gradio
+diffusers
+transformers
+Pillow
