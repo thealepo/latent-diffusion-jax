@@ -1,12 +1,32 @@
-from typing import List
+'''
+unet.py
 
+UNet architecture implemented in Flax NNX.
+
+Architecture overview:
+  init_conv
+  ↓
+  DownBlock x N  (DoubleConv → optional CrossAttention → MaxPool) + skip connections
+  ↓
+  Bottleneck     (DoubleConv → CrossAttention)
+  ↓
+  UpBlock x N    (ConvTranspose → concat skip → DoubleConv → optional CrossAttention)
+  ↓
+  final_norm → silu → final_conv
+'''
+
+from typing import List , Optional , Tuple
+import jax
 import jax.numpy as jnp
 import flax.nnx as nnx
 from einops import rearrange
 
 
-# Timestep Embedding
-def get_timestep_embedding(timesteps , embedding_dim: int = 256):
+# Positional Embedding (Timestep)
+def get_timestep_embedding(timesteps: jnp.ndarray , embedding_dim: int = 256) -> jnp.ndarray:
+    '''
+    Transformer-style positional embedding for timesteps.
+    '''
     half_dim = embedding_dim // 2
     exponent = -jnp.log(10000.0) * jnp.arange(half_dim) / half_dim
     emb = jnp.exp(exponent)
@@ -15,23 +35,26 @@ def get_timestep_embedding(timesteps , embedding_dim: int = 256):
 
 # Double Convolution Block
 class DoubleConv(nnx.Module):
-    def __init__(self , in_channels , out_channels , time_embed_dim , * , rngs):
+    def __init__(self , in_channels: int , out_channels: int , time_embed_dim: int , * , rngs: jax.Array) -> None:
+        # First convolution
         self.conv1 = nnx.Conv(in_channels , out_channels , kernel_size=(3,3) , padding='SAME' , rngs=rngs)
         self.norm1 = nnx.GroupNorm(num_groups=32 , num_features=out_channels , rngs=rngs)
+        # Second convolution
         self.conv2 = nnx.Conv(out_channels , out_channels , kernel_size=(3,3) , padding='SAME' , rngs=rngs)
         self.norm2 = nnx.GroupNorm(num_groups=32 , num_features=out_channels , rngs=rngs)
 
+        # Timestep MLP projection
         self.time_mlp = nnx.Linear(time_embed_dim , out_channels , rngs=rngs)
 
-    def __call__(self , x , time_embed):
+    def __call__(self , x: jnp.ndarray , time_embed: jnp.ndarray) -> jnp.ndarray:
         # First Convolution
         x = self.conv1(x)
         x = self.norm1(x)
         x = nnx.silu(x)
 
         # Time embeddings
-        t = self.time_mlp(nnx.silu(time_embed))
-        t = rearrange(t , 'b c -> b 1 1 c')
+        t = self.time_mlp(nnx.silu(time_embed))  # (B , out_channels)
+        t = rearrange(t , 'b c -> b 1 1 c')      # (B , 1 , 1 , out_channels)
         x = x + t
 
         # Second Convolution
@@ -44,12 +67,15 @@ class DoubleConv(nnx.Module):
 # Cross Attention Block
 # Query (Image) attends to Key (Text) and Value (Text)
 class CrossAttention(nnx.Module):
-    def __init__(self , channels , context_dim , n_heads: int = 8 , * , rngs):
+    '''
+    Multi-headed cross-attention.
+    '''
+    def __init__(self , channels: int , context_dim: int , n_heads: int = 8 , * , rngs: nnx.RNGs) -> None:
         self.n_heads = n_heads
         self.head_dim = channels // n_heads
         self.norm = nnx.GroupNorm(num_groups=32 , num_features=channels , rngs=rngs)
 
-        # Attention Matrices
+        # Projection matrices
         self.wq = nnx.Linear(channels , channels , rngs=rngs)
         self.wk = nnx.Linear(context_dim , channels , rngs=rngs)
         self.wv = nnx.Linear(context_dim , channels , rngs=rngs)
@@ -59,54 +85,66 @@ class CrossAttention(nnx.Module):
         B , H , W , C = x.shape
         residual = x
 
+        # Normalize, and then flatten spatial dimensions (for attention)
         h = self.norm(x)
-        h_flat = rearrange(h , 'b h w c -> b (h w) c')
+        h_flat = rearrange(h , 'b h w c -> b (h w) c')  # (B, H*W , C)
 
-        Q = self.wq(h_flat)
-        K = self.wk(context)
-        V = self.wv(context)
+        # Compute Q from image, K and V from text
+        Q = self.wq(h_flat)    # (B , H*W , C)
+        K = self.wk(context)   # (B , seq_len , C)
+        V = self.wv(context)   # (B , seq_len , C)
 
+        # Splitting into heads
         def mha_reshape(tensor):
             return rearrange(tensor , 'b n (head d) -> b head n d' , head=self.n_heads)
         Q , K , V = map(mha_reshape , (Q , K , V))
 
+        # Scaled dot product
         scale = 1.0 / jnp.sqrt(self.head_dim)
         attention = jnp.einsum('b h i d , b h j d -> b h i j' , Q , K) * scale
         attention = nnx.softmax(attention , axis=-1)
-        out = jnp.einsum('b h i j , b h j d -> b h i d' , attention , V)
+        out = jnp.einsum('b h i j , b h j d -> b h i d' , attention , V) 
 
-        out = rearrange(out , 'b h n d -> b n (h d)')
+        out = rearrange(out , 'b h n d -> b n (h d)') # merging heads back together
         out = self.wo(out)
-        out = out.reshape((B , H , W , C))
+        out = out.reshape((B , H , W , C)) # (B , H , W , C)
 
         return out + residual
 
 # Downsample Block
 # Consists of DoubleConv, CrossAttention, followed by a max pool
 class DownBlock(nnx.Module):
-    def __init__(self , in_channels , out_channels , time_embed_dim , context_dim , use_attn , * , rngs):
+    '''
+    Encoder block: DoubleConv → optional CrossAttention → MaxPool
+    Returns both the downsampled feature map and the skip connection.
+    '''
+    def __init__(self , in_channels: int , out_channels: int , time_embed_dim: int , context_dim: int , use_attn: bool , * , rngs: nnx.RNGs) -> None:
         self.double_conv = DoubleConv(in_channels , out_channels , time_embed_dim , rngs=rngs)
         self.attention = CrossAttention(out_channels , context_dim , rngs=rngs) if use_attn else None
 
-    def __call__(self , x , t , context):
+    def __call__(self , x: jnp.ndarray , t: jnp.ndarray , context: jnp.ndarray) -> Tuple[jnp.ndarray , jnp.ndarray]:
         x = self.double_conv(x , t)
         if self.attention:
             x = self.attention(x , context)
         
-        skip = x
+        skip = x # saving the skip connection
         x = nnx.max_pool(x , window_shape=(2,2) , strides=(2,2))
         return x , skip
 
 # Upsample Block
 # Consists of a Convolutional Transpose, Double Convolution, and Cross Attention
 class UpBlock(nnx.Module):
-    def __init__(self , in_channels , skip_channels , out_channels , time_embed_dim , context_dim , use_attn , * , rngs):
+    '''
+    Decoder block: ConvTranspose → concat skip → DoubleConv → optional CrossAttention
+    Returns the upsampled feature map.
+    '''
+    def __init__(self , in_channels: int , skip_channels: int , out_channels: int , time_embed_dim: int , context_dim: int , use_attn: bool , * , rngs: nnx.RNGs) -> None:
         self.upsample = nnx.ConvTranspose(in_channels , in_channels , kernel_size=(2,2) , strides=(2,2) , padding='SAME' , rngs=rngs)
         self.double_conv = DoubleConv(in_channels + skip_channels , out_channels , time_embed_dim , rngs=rngs)
         self.attention = CrossAttention(out_channels , context_dim , rngs=rngs) if use_attn else None
 
-    def __call__(self , x , skip , t , context):
-        x = self.upsample(x)
+    def __call__(self , x: jnp.ndarray , skip: jnp.ndarray , t: jnp.ndarray , context: jnp.ndarray) -> jnp.ndarray:
+        x = self.upsample(x) # (B, H*2 , W*2 , C)
         x = jnp.concatenate([x , skip] , axis=-1)
         x = self.double_conv(x , t)
         if self.attention:
@@ -115,7 +153,12 @@ class UpBlock(nnx.Module):
 
 # Full UNet Model
 class UNet(nnx.Module):
-    def __init__(self , in_channels , block_out_channels=[128,256,512,512] , time_embed_dim=256 , context_dim=768 , attention_levels=[False,True,True,True] , * , rngs):
+    '''
+    Full UNet.
+    Configuration is implemented for 256x256x3 images encoded as 32x32x4 latents.
+    '''
+    def __init__(self , in_channels: int , block_out_channels: List[int] = [128,256,512,512] , time_embed_dim: int = 256 , context_dim: int = 768 , attention_levels: List[bool] = [False,True,True,True] , * , rngs: nnx.RNGs) -> None:
+        # Timestep MLP Projection: embedding_dim -> 4*embedding_dim -> embedding_dim
         self.time_mlp = nnx.Sequential(
             nnx.Linear(time_embed_dim , time_embed_dim*4 , rngs=rngs),
             nnx.Linear(time_embed_dim*4 , time_embed_dim , rngs=rngs)
@@ -152,11 +195,12 @@ class UNet(nnx.Module):
         self.final_up = UpBlock(channel , block_out_channels[i] , channel , time_embed_dim , context_dim , reversed_attention[0] , rngs=rngs)
 
         # Final projections
-        self.final_conv = nnx.Conv(channel , out_channels , kernel_size=(3,3) , padding='SAME' , rngs=rngs)
+        self.final_conv = nnx.Conv(channel , in_channels , kernel_size=(3,3) , padding='SAME' , rngs=rngs)
         self.final_norm = nnx.GroupNorm(num_groups=32 , num_features=out_channels , rngs=rngs)
 
-    def __call__(self , x , t_embed , context):
-        t = get_timestep_embedding(t_embed)
+    def __call__(self , x: jnp.ndarray , timesteps: jnp.ndarray , context: jnp.ndarray) -> jnp.ndarray:
+        # Build the timetep embedding and pass through the MLP
+        t = get_timestep_embedding(t_embed)  # (B , time_embed_dim)
         t = self.time_mlp.layers[0](t)
         t = nnx.silu(t)
         t = self.time_mlp.layers[1](t)
