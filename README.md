@@ -14,6 +14,22 @@ The full pipeline includes noise scheduling, the main U-Net architecture (with c
 
 ---
 
+## Architecture
+
+This model was built from scratch in JAX/Flax NNX and follows the standard latent diffusion design:
+
+- **DDPM Scheduler:** Linear beta schedule with the forward/reverse process mathematical constants. Implements `add_noise` (forward) and `step` (reverse) for training and inference respectively.
+- **UNet:** The core model. Consists of symmetric encoder/decoder paths (with skip connections), a deep bottleneck, and a final projection.
+    - **DoubleConv Blocks:** Two Conv -> GroupNorm -> SiLU layers.
+    - **CrossAttention Blocks:** Multihead attention where the image features (query) attend to CLIP text embeddings (key/value). Applied at the deepest layers of the UNet.
+    - **DownBlocks / UpBlocks:** DoubleConv + optional CrossAttention, with MaxPool downsampling and ConvTranspose upsampling.
+    - **Timestep Embedding:** Encoding of integer timestep, passed through an MLP.
+- **Frozen CLIP Encoder:** Encodes text prompts into 768-dim embeddings that condition the UNet via cross-attention. (`openai/clip-vit-large-patch14`)
+- **Frozen VAE:** Compresses 256×256 images into 32×32×4 latents for training, and decodes generated latents back to pixel space. (`runwayml/stable-diffusion-v1-5`)
+- **Classifier-Free Guidance (CFG):** Done during training so that model learns both conditional and unconditional denoising. At inference, both passes are compared: `ε = ε_uncond + scale * (ε_cond − ε_uncond)`.
+
+---
+
 ## Some Generated Images!
 
 While a full training cycle was not done, we still have some previews on the capabilities of the model, having trained on ***120k MS-COCO*** images for 30 epochs. Enjoy the 3 test samples, which include the prompts `a sunset over the city`, `a red car on a highway`, and `a cat in the grass` respectively. The images are shown from epochs 10, 20, and 30.
@@ -40,4 +56,10 @@ This would be what you can consider out "worst" results. Due to the cat's fine f
 
 ## Notes
 
-*Yes*, these images aren't the best. Let these simply serve as a proof-of-concept of this system showing emergent semantic capabilities and image generation. Due to the large dataset, lack of compute, and potential optimization issues, I wasn't able to achieve incredible results. But, I hope this implementation still serves as a good learning ground, as well as the ***[Google Colab Notebook](https://colab.research.google.com/drive/1YZqdrmZ4bmJNQZvfoc4FirldroHJgnY2?usp=sharing).*** and ***YouTube Lectures: [Lecture (Theory)](https://youtu.be/qHOgvKH1Gi0?si=3FkU_mwkRP2j1V_Y), [Implementation (Code)](https://youtu.be/xPImI7d5IvY?si=uLmnFJO0G5o-j81a)***
+These results serve as a proof-of-concept, not a production model. The goal of this project was to build a latent diffusion system from the ground up in JAX. 30 epochs on a limited compute budget is enough to see the model develop real semantic structure, which is the point.
+
+For a deeper walkthrough of the theory and implementation, check out the accompanying lectures:
+
+- [Lecture (Theory)](https://youtu.be/qHOgvKH1Gi0?si=3FkU_mwkRP2j1V_Y)
+- [Implementation (Code)](https://youtu.be/xPImI7d5IvY?si=uLmnFJO0G5o-j81a)
+- [Google Colab Notebook](https://colab.research.google.com/drive/1YZqdrmZ4bmJNQZvfoc4FirldroHJgnY2?usp=sharing)
