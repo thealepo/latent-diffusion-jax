@@ -20,7 +20,7 @@ While a full training cycle was not done, we still have some previews on the cap
 
 ### "A Sunset over the City"
 
-This was my favorite! The 30th epoch representation for this prompt shows this artistic image. Although details still lack, you can definitely consider it a beautiful image.
+This was my favorite! The 30th epoch representation for this prompt shows this artistic image. Although details largely lack to consider it realistic (off by a lot), you can definitely consider it beautiful "art".
 
 ![CITY](./assets/A_SUNSET_OVER_THE_CITY_30.png)
 
