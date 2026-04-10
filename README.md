@@ -10,13 +10,11 @@ A JAX implementation of **Latent Diffusion**. Visit the ***[Google Colab Noteboo
 
 This repository implements the core mechanisms of diffusion, including the **Scheduler** and the **U-Net Architecture**. The supporting **Variational Autoencoder (VAE)** and **CLIP** model are frozen and imported. Therefore, you can consider the core paper this code follows as *[Denoising Diffusion Probabilistic Models](https://arxiv.org/pdf/2006.11239)*, with some supporting ideas from *[High-Resolution Image Synthesis with Latent Diffusion Models](https://arxiv.org/pdf/2112.10752)*.
 
-The full pipeline includes noise scheduling, the main U-Net architecture (with cross-attention injected at lower levels), and classifier-free guidance, all written in **JAX/Flax NNX**.
-
 ---
 
 ## Architecture
 
-This model was built from scratch in JAX/Flax NNX and follows the standard latent diffusion design:
+This model was built from scratch in **JAX/Flax NNX** and follows the standard latent diffusion design:
 
 - **DDPM Scheduler:** Linear beta schedule with the forward/reverse process mathematical constants. Implements `add_noise` (forward) and `step` (reverse) for training and inference respectively.
 - **UNet:** The core model. Consists of symmetric encoder/decoder paths (with skip connections), a deep bottleneck, and a final projection.
