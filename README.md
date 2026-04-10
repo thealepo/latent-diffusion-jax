@@ -60,6 +60,6 @@ These results serve as a proof-of-concept, not a production model. The goal of t
 
 For a deeper walkthrough of the theory and implementation, check out the accompanying lectures:
 
-- [Lecture (Theory)](https://youtu.be/qHOgvKH1Gi0?si=3FkU_mwkRP2j1V_Y)
-- [Implementation (Code)](https://youtu.be/xPImI7d5IvY?si=uLmnFJO0G5o-j81a)
+- [Lecture Video (Theory)](https://youtu.be/qHOgvKH1Gi0?si=3FkU_mwkRP2j1V_Y)
+- [Implementation Video (Code)](https://youtu.be/xPImI7d5IvY?si=uLmnFJO0G5o-j81a)
 - [Google Colab Notebook](https://colab.research.google.com/drive/1YZqdrmZ4bmJNQZvfoc4FirldroHJgnY2?usp=sharing)
