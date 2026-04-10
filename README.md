@@ -35,3 +35,9 @@ We can see the model follow the prompts we gave it. As the epochs pass, you can 
 This would be what you can consider out "worst" results. Due to the cat's fine features, the representation remained the most abstract, though it is interesting to note the level of detail the grass started getting.
 
 ![CAT](./assets/A_CAT_IN_THE_GRASS.png)
+
+---
+
+## Notes
+
+*Yes*, these images aren't the best. Let these simply serve as a proof-of-concept of this system showing emergent semantic capabilities and image generation. Due to the large dataset, lack of compute, and potential optimization issues, I wasn't able to achieve incredible results. But, I hope this implementation still serves as a good learning ground, as well as the ***[Google Colab Notebook](https://colab.research.google.com/drive/1YZqdrmZ4bmJNQZvfoc4FirldroHJgnY2?usp=sharing).*** and ***YouTube Lectures: [1](https://youtu.be/qHOgvKH1Gi0?si=3FkU_mwkRP2j1V_Y), [2](https://youtu.be/xPImI7d5IvY?si=uLmnFJO0G5o-j81a)***
